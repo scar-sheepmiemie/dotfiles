@@ -95,3 +95,9 @@ precmd() { update_cmd_duration; build_left_prompt; build_right_prompt; }
 alias ll='ls -lhaG'; alias ..='cd ..'; alias g='git'
 [ -f ~/.fzf.zsh ] && source ~/.fzf.zsh
 if command -v zoxide &> /dev/null; then eval "$(zoxide init zsh)"; fi
+
+# --- Zsh Autosuggestions Key Binding ---
+# The widget for accepting a suggestion is `autosuggest-accept`.
+# We bind it to Ctrl+Space for a reliable, cross-terminal experience.
+# Note: Ctrl+Tab is not a standard terminal keycode and may not work.
+bindkey '^ ' autosuggest-accept
