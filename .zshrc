@@ -9,6 +9,10 @@
 export ZSH="$HOME/.oh-my-zsh"
 ZSH_THEME=""
 
+# Set VIM as default editor
+export VISUAL=vim
+export EDITOR="$VISUAL"
+
 # --- Full, desired plugin list ---
 plugins=(
   git
