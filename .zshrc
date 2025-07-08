@@ -1,7 +1,9 @@
 # ====================================================================
-# .zshrc - Portable and efficient configuration by CircuIT (v12 - Final)
+# .zshrc - Portable and efficient configuration by CircuIT (v17 - Final)
 #
-# This is the definitive, feature-complete, and readable version.
+# This is the definitive, readable, and feature-complete version.
+# It includes a native Zsh function to reliably set the Splunk environment,
+# replacing the need for external, problematic scripts.
 # ====================================================================
 
 export ZSH="$HOME/.oh-my-zsh"
@@ -17,12 +19,10 @@ plugins=(
   zsh-syntax-highlighting
 )
 
-# --- ZSH Syntax Highlighting Configuration (for Vi Mode) ---
-# This MUST be defined *before* Oh My Zsh is sourced.
+# --- ZSH Syntax Highlighting Configuration ---
 export ZSH_HIGHLIGHT_HIGHLIGHTERS=(main brackets pattern cursor)
 
 # --- Oh My Zsh Core ---
-# This line must come after plugin and theme definitions.
 source $ZSH/oh-my-zsh.sh
 
 # --- General Exports and Options ---
@@ -49,7 +49,8 @@ preexec() {
 
 update_cmd_duration() {
     if [[ -n $zsh_timer ]]; then
-        local duration=$((${EPOCHREALTIME} - ${zsh_timer}))
+        local duration
+        duration=$((${EPOCHREALTIME} - ${zsh_timer}))
         if (( duration > CMD_EXEC_THRESHOLD )); then
             CMD_DURATION_STR=$(printf "⏱ %.3fs " "$duration")
         else
@@ -68,7 +69,8 @@ COLOR_FG_PY="111"
 
 # --- PROMPT SEGMENT FUNCTIONS ---
 prompt_status() {
-    if (($? == 0)); then
+    local exit_code=$1
+    if ((exit_code == 0)); then
         echo "%F{green}${ICON_SUCCESS}%f"
     else
         echo "%F{red}${ICON_FAIL}%f"
@@ -107,6 +109,7 @@ prompt_pyenv() {
 
 # --- PROMPT BUILDER FUNCTIONS ---
 build_left_prompt() {
+    local last_exit_code=$1
     local prompt_string=""
     local last_bg_color="black"
 
@@ -134,16 +137,18 @@ build_left_prompt() {
     prompt_string+=${dir_segment}
     prompt_string+="%F{$COLOR_BG_DIR}${SEPARATOR}%f "
 
-    PROMPT="$(prompt_pyenv)$(prompt_status) ${prompt_string}"
+    PROMPT="$(prompt_pyenv)$(prompt_status $last_exit_code) ${prompt_string}"
 }
 
 build_right_prompt() {
     RPROMPT="${CMD_DURATION_STR}%F{gray}%*%f"
 }
 
+# --- PRECMD HOOK (This contains the critical fix for the status bug) ---
 precmd() {
+    local last_exit_code=$? # Capture the exit code IMMEDIATELY
     update_cmd_duration
-    build_left_prompt
+    build_left_prompt $last_exit_code # Pass the captured code to the builder
     build_right_prompt
 }
 
@@ -159,5 +164,45 @@ if command -v zoxide &> /dev/null; then
 fi
 
 # --- Zsh Autosuggestions Key Binding ---
-# Bind Ctrl+Space to accept the current suggestion.
 bindkey '^ ' autosuggest-accept
+
+# --- Helper function for setting up the Splunk environment ---
+# This function replaces the need for the problematic setSplunkEnv script.
+function setup_splunk_env() {
+    # You can customize this path to your default Splunk installation directory
+    local splunk_dir="${SPLUNK_HOME:-$HOME/splunk}"
+
+    if [ ! -d "$splunk_dir" ]; then
+        echo "Error: Splunk directory not found at '$splunk_dir'." >&2
+        echo "Please set \$SPLUNK_HOME or place Splunk in ~/splunk." >&2
+        return 1
+    fi
+
+    local splunk_exec="$splunk_dir/bin/splunk"
+
+    if [ ! -x "$splunk_exec" ]; then
+        echo "Error: splunk executable not found or not executable at '$splunk_exec'." >&2
+        return 1
+    fi
+
+    echo "Sourcing environment from Splunk..."
+    # Use process substitution source <(...) to safely evaluate the output.
+    # This avoids the 'eval' black hole and will show any errors from 'splunk envvars'.
+    source <("$splunk_exec" envvars | grep -v "Warning")
+
+    local exit_code=$?
+    if [ $exit_code -eq 0 ]; then
+        echo "Splunk environment variables sourced successfully."
+        # Optionally, source the completion script as well
+        if [ -f "$SPLUNK_HOME/share/splunk/cli-command-completion.sh" ]; then
+            source "$SPLUNK_HOME/share/splunk/cli-command-completion.sh"
+            echo 'Tab-completion of "splunk <verb> <object>" is now available.' >&2
+        fi
+    else
+        echo "Error: Failed to source Splunk environment. Please check the output above." >&2
+    fi
+    return $exit_code
+}
+
+# Create a simple alias to run the setup function
+alias splunk-on='setup_splunk_env'

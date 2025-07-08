@@ -42,7 +42,7 @@ set tabstop=4 softtabstop=4 shiftwidth=4 expandtab
 set autoindent smartindent
 
 " --- Editing & Usability ---
-set mouse=a
+"set mouse=a
 set backspace=indent,eol,start
 set whichwrap+=<,>,h,l
 set wrap
