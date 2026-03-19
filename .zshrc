@@ -210,3 +210,190 @@ function setup_splunk_env() {
 
 # Create a simple alias to run the setup function
 alias splunk-on='setup_splunk_env'
+
+# pyenv
+export PYENV_ROOT="$HOME/.pyenv"
+[[ -d $PYENV_ROOT/bin ]] && export PATH="$PYENV_ROOT/bin:$PATH"
+eval "$(pyenv init - zsh)"
+eval "$(pyenv virtualenv-init - zsh)"
+
+alias splunk-clean='rm -fr "$SPLUNK_HOME"/* ; rm -fr "$SPLUNK_BUILD"/* ; cd "$SPLUNK_SOURCE/contrib" && ./buildit.py distclean ; cd "$SPLUNK_SOURCE" && git clean -dfx -e $SPLUNK_SOURCE/codex-plans/'
+
+# Copy local splunkd to remote host and restart Splunk
+splunk_update() {
+  local host="$1"
+  if [[ -z "$host" ]]; then
+    echo "usage: splunk_update <ip-or-hostname>" >&2
+    return 2
+  fi
+
+  env -i \
+    PATH=/usr/bin:/bin \
+    HOME="$HOME" \
+    SSH_AUTH_SOCK="${SSH_AUTH_SOCK:-}" \
+    scp -P 2222 "$HOME/splunk_home/bin/splunkd" "ansible@${host}:~/splunkd" || return $?
+
+  env -i \
+    PATH=/usr/bin:/bin \
+    HOME="$HOME" \
+    SSH_AUTH_SOCK="${SSH_AUTH_SOCK:-}" \
+    ssh -p 2222 "ansible@${host}" \
+    "sudo mv -n /opt/splunk/bin/splunkd /opt/splunk/bin/splunkd.bak || true && \
+     sudo chown splunk:splunk ~/splunkd && \
+     sudo mv ~/splunkd /opt/splunk/bin/splunkd && \
+     sudo -u splunk sh -c '/opt/splunk/bin/splunk restart'"
+}
+
+splunk_conf() {
+  emulate -L zsh
+  setopt pipefail
+
+  local method="GET"
+  local file="" stanza="" name="" value=""
+  local auth="admin:'Chang3d!'"
+  local dryrun=0
+
+  # If first arg doesn't start with '-', treat it as host and shift it off.
+  local host=""
+  if [[ -n "$1" && "$1" != -* ]]; then
+    host="$1"
+    shift
+  fi
+
+  local opt
+  while getopts ":GPf:s:n:v:u:D" opt; do
+    case "$opt" in
+      G) method="GET" ;;
+      P) method="POST" ;;
+      f) file="$OPTARG" ;;
+      s) stanza="$OPTARG" ;;
+      n) name="$OPTARG" ;;
+      v) value="$OPTARG" ;;
+      u) auth="$OPTARG" ;;
+      D) dryrun=1 ;;
+      \?) print -u2 "Unknown option: -$OPTARG"; return 2 ;;
+      :)  print -u2 "Option -$OPTARG requires an argument."; return 2 ;;
+    esac
+  done
+  shift $((OPTIND - 1))
+
+  # If host wasn't first, allow it as the last remaining arg (common with parhosts)
+  if [[ -z "$host" ]]; then
+    if [[ $# -ge 1 && "$1" != -* ]]; then
+      host="$1"
+      shift
+    fi
+  fi
+
+  if [[ -z "$host" ]]; then
+    print -u2 "usage: splunk_conf <host> [-G|-P] -f <file> -s <stanza> [-n <name>] [-v <value>] [-u \"admin:'Chang3d!'\" ] [-D]"
+    return 2
+  fi
+
+  if [[ -z "$file" || -z "$stanza" ]]; then
+    print -u2 "Error: -f <file> and -s <stanza> are required."
+    return 2
+  fi
+
+  if [[ "$method" == "GET" ]]; then
+    [[ -n "$value" ]] && { print -u2 "Error: GET does not take -v <value>."; return 2; }
+  else
+    [[ -z "$name" || -z "$value" ]] && { print -u2 "Error: POST requires -n <name> and -v <value>."; return 2; }
+  fi
+
+  local url="https://localhost:8089/servicesNS/nobody/system/configs/conf-${file}/${stanza}?output_mode=json"
+  local pretty_cmd="(python3 -m json.tool 2>/dev/null || python -m json.tool 2>/dev/null || cat)"
+
+  local curl_cmd="curl -sS -k -u ${auth} -X ${method} ${url}"
+  if [[ "$method" == "POST" ]]; then
+    curl_cmd+=" -d ${name}=${value}"
+  fi
+  curl_cmd+=" | ${pretty_cmd}"
+  if [[ "$method" == "GET" && -n "$name" ]]; then
+    curl_cmd+=" | grep -F -- ${name}"
+  fi
+
+  if (( dryrun )); then
+    print -r -- "env -i PATH=/usr/bin:/bin HOME=\"$HOME\" SSH_AUTH_SOCK=\"${SSH_AUTH_SOCK:-}\" ssh -p 2222 ansible@${host} ${(qqq)curl_cmd}"
+    return 0
+  fi
+
+  env -i \
+    PATH=/usr/bin:/bin \
+    HOME="$HOME" \
+    SSH_AUTH_SOCK="${SSH_AUTH_SOCK:-}" \
+    ssh -p 2222 "ansible@${host}" \
+    "$curl_cmd"
+}
+
+parhosts() {
+  emulate -L zsh
+  setopt pipefail
+
+  local hosts_csv="$1"; shift
+  local jobs="${JOBS:-10}"
+
+  if [[ -z "$hosts_csv" || $# -lt 1 ]]; then
+    print -u2 "usage: parhosts <host[,host...]> <command...>   (set JOBS=N env var to change parallelism)"
+    return 2
+  fi
+
+  local -a hosts pids pid_hosts ok_hosts fail_hosts
+  local -A pid_to_host
+  hosts=("${(@s:,:)hosts_csv}")
+  hosts=("${hosts[@]//[[:space:]]/}")
+
+  # helper: wait one pid, record success/fail, and remove it from pid list
+  _parhosts_wait_one() {
+    local pid="$1"
+    local h="${pid_to_host[$pid]}"
+    local rc=0
+    wait "$pid" || rc=$?
+    if (( rc == 0 )); then
+      ok_hosts+=("$h")
+    else
+      fail_hosts+=("$h")
+    fi
+    unset "pid_to_host[$pid]"
+  }
+
+  for h in "${hosts[@]}"; do
+    [[ -z "$h" ]] && continue
+
+    {
+      print -r -- "===== $h ====="
+      "$@" "$h"
+    } &
+    local pid=$!
+    pids+=("$pid")
+    pid_to_host[$pid]="$h"
+
+    # Throttle: if too many running, wait for the oldest
+    if (( jobs > 0 && ${#pids[@]} >= jobs )); then
+      _parhosts_wait_one "${pids[1]}"
+      pids=("${pids[@]:1}")
+    fi
+  done
+
+  # Wait the rest
+  local pid
+  for pid in "${pids[@]}"; do
+    _parhosts_wait_one "$pid"
+  done
+
+  print -r -- ""
+  print -r -- "====== Summary ======"
+  if (( ${#ok_hosts[@]} > 0 )); then
+    print -r -- "SUCCESS (${#ok_hosts[@]}): ${(j:, :)ok_hosts}"
+  else
+    print -r -- "SUCCESS (0):"
+  fi
+  if (( ${#fail_hosts[@]} > 0 )); then
+    print -r -- "FAILED  (${#fail_hosts[@]}): ${(j:, :)fail_hosts}"
+  else
+    print -r -- "FAILED  (0):"
+  fi
+
+  (( ${#fail_hosts[@]} > 0 )) && return 1
+  return 0
+}
