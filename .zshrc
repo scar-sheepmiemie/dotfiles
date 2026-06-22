@@ -35,11 +35,6 @@ HISTSIZE=10000
 SAVEHIST=10000
 setopt HIST_IGNORE_DUPS
 
-# --- Pyenv Initialization (if installed) ---
-if command -v pyenv &> /dev/null; then
-  eval "$(pyenv init --path)"
-  eval "$(pyenv init -)"
-fi
 
 # --- Custom Command Execution Timer ---
 zmodload zsh/datetime
@@ -171,9 +166,11 @@ bindkey '^ ' autosuggest-accept
 
 # pyenv
 export PYENV_ROOT="$HOME/.pyenv"
-[[ -d $PYENV_ROOT/bin ]] && export PATH="$PYENV_ROOT/bin:$PATH"
-eval "$(pyenv init - zsh)"
-eval "$(pyenv virtualenv-init - zsh)"
+if [[ -d $PYENV_ROOT/bin ]]; then
+    export PATH="$PYENV_ROOT/bin:$PATH"
+    eval "$(pyenv init - zsh)"
+    eval "$(pyenv virtualenv-init - zsh)"
+fi
 
 export PATH="$HOME/.local/bin:$PATH"
 
