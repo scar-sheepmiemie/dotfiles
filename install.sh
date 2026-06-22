@@ -141,8 +141,19 @@ setup_vim() {
     success "Vim setup complete."
 }
 
+setup_pyenv() {
+    info "--- Step 7: Installing pyenv ---"
+    if [ -d "$HOME/.pyenv" ]; then
+        success "pyenv already installed at ~/.pyenv."
+        return
+    fi
+    info "Installing pyenv via installer script..."
+    curl -fsSL https://pyenv.run | bash
+    success "pyenv installed. It will be active on next login."
+}
+
 setup_zsh_enhancements() {
-    info "--- Step 7: Setting up Zsh enhancements (fonts & plugins) ---"
+    info "--- Step 8: Setting up Zsh enhancements (fonts & plugins) ---"
     local zsh_setup_script="$SCRIPT_DIR/setup_zsh_enhancements.sh"
     if [ -f "$zsh_setup_script" ]; then
         chmod +x "$zsh_setup_script"
@@ -159,6 +170,7 @@ main() {
     create_symlinks
     setup_global_git_config
     setup_vim
+    setup_pyenv
     setup_zsh_enhancements
     echo
     success "================ SETUP COMPLETE! ================"
@@ -181,7 +193,9 @@ verify_installation() {
     done
     info "5. Checking for vim-plug...";
     if [ -f "$HOME/.vim/autoload/plug.vim" ]; then success "   [✔] Found vim-plug."; else error "   [✘] vim-plug is not installed."; all_ok=false; fi
-    info "6. Verifying Zsh setup...";
+    info "6. Checking for pyenv...";
+    if [ -d "$HOME/.pyenv" ]; then success "   [✔] Found ~/.pyenv."; else error "   [✘] pyenv is not installed."; all_ok=false; fi
+    info "7. Verifying Zsh setup...";
     "$SCRIPT_DIR/setup_zsh_enhancements.sh" --verify | sed 's/^/   /';
     echo "--------------------------------------------------------------"
     if [ "$all_ok" = true ]; then success "All checks passed!"; else error "Some checks failed."; fi
