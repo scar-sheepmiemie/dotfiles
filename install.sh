@@ -89,11 +89,8 @@ setup_personal_git_config() {
         success "Personal Git config already exists. Skipping."
         return
     fi
-    info "Please provide your PERSONAL Git identity."
-    read -p "Enter your personal Git name: " git_name
-    read -p "Enter your personal Git email: " git_email
-    echo -e "[user]\n    name = $git_name\n    email = $git_email" > "$HOME/.gitconfig-personal"
-    success "Created ~/.gitconfig-personal."
+    echo -e "[user]\n    name = scar-sheepmiemie\n    email = scaryangzp@gmail.com" > "$HOME/.gitconfig-personal"
+    success "Created ~/.gitconfig-personal (scar-sheepmiemie / scaryangzp@gmail.com)."
 }
 
 create_symlinks() {
